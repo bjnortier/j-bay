@@ -42,9 +42,9 @@ function initws() {
 
   ws.onmessage = function (evt) {
     var data = evt.data;
-    $("#editor").html(data);
+    //$("#editor").html(data);
     //     $("#editor").focus();
-    //$("#editor").html('!' + $("#editor").html());
+    $("#editor").html('!' + $("#editor").html());
     //$("#editor").focus();
     restoreSelection();
   };
@@ -70,9 +70,12 @@ $('#editor').blur(function() {
 
 $('#editor').keyup(function() {
     
-
-    txText();
     saveSelection(); 
+    //$("#editor").html('!' + $("#editor").html());
+    //$("#editor").focus();
+    //restoreSelection();
+    txText();
+
     //var data = $("#editor").html();
     //var text = $("#editor").text();
     //captureSelection();
