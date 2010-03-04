@@ -1,0 +1,31 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html> 
+  <head>
+    <title></title>
+    <style type="text/css">
+      .editable {
+      padding: 0.5em;
+      margin: 0.5em;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <span id="editor" contenteditable="true" class="editable">XYZ</span>
+    <script src="jquery.js"></script>
+    <script src="selectionutil.js"></script>
+    <script src="editor.js"></script>
+    <script>
+      $(document).ready(function(){
+      if (!("Websocket" in window)) {
+      init_selection();
+      initws();
+      } else {
+      alert("No websockets!");
+      }
+      });
+    </script>
+
+
+  </body>
