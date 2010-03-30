@@ -3,6 +3,10 @@
   <head>
     <title></title>
     <style type="text/css">
+      #editor {
+      min-width: 5em;
+      min-height: 5em;
+      }
       #errors {
       color: red;
       }
@@ -11,13 +15,13 @@
 
   <body>
 
-    <div style="margin: 2em">
-      <span id="editor" contenteditable="true" class="editable">X</span>
-    </div>
+    <textarea rows="10" cols="40" id="editor" class="not-editing"></textarea>
+    <div id="output"></div>
+    <div id="cursor"></div>
     <div id="console"></div>
     <div id="errors"></div>
     <script src="jquery.js"></script>
-    <script src="ws.js"></script>
     <script src="editor.js"></script>
+    
   </body>
 </html>

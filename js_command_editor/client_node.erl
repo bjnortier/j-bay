@@ -6,14 +6,17 @@
 %%  but is included here to make the example self-contained
 
 start() ->
-    F = fun interact/2,
-    spawn(fun() -> start(F, 0) end).
+    spawn(fun() -> start(fun interact/2, 0) end).
 
 interact(Browser, State) ->
     receive
-	{browser, Browser, Str} ->
-	    io:format("~p~n", [Str]),
-	    Browser ! {send, mochijson2:encode(<<"ack">>)},
+	{browser, Browser, Msg = {_ClientVersion, Ops}} ->
+	    io:format("received: ~p~n", [Msg]),
+	    Browser ! {send, mochijson2:encode(
+			       {struct, [{<<"ack">>, {struct, [
+							       {<<"opsApplied">>, length(Ops)}
+							      ]}}]})},
+	    timer:sleep(1000),
 	    interact(Browser, State)
     end.
 
@@ -79,13 +82,11 @@ handle_data([], L, Socket, Pid) ->
     loop(L, Socket, Pid).
 
 handle_message(Message, InteractPid) ->
-    DocOps = json_to_docops(Message),
-    InteractPid ! {browser, self(), DocOps}.
+    {struct, [{<<"clientVersion">>, ClientVersion},
+	      {<<"ops">>, Ops}]} = mochijson2:decode(Message),   
+    DocOps = to_docops(Ops),
+    InteractPid ! {browser, self(), {ClientVersion, DocOps}}.
 
-
-json_to_docops(JSON) ->
-    Decoded = mochijson2:decode(JSON),    
-    to_docops(Decoded).
 
 to_docops(List) when is_list(List) ->
     lists:map(fun to_docops/1, List);
