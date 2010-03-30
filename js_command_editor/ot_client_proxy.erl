@@ -7,7 +7,23 @@ start() ->
     State = #state{},
     spawn(fun() -> create_listener(State) end).
 
-proxy(Browser, State0) ->
+
+component_to_json_format({Type, String}) when is_list(String) ->
+    {Type, list_to_binary(String)};
+component_to_json_format(X) ->
+    X.
+    
+
+ops_to_json_format(Ops) ->
+    lists:map(fun(Op) ->
+ 		      lists:map(fun(Component) ->
+ 					{struct, [component_to_json_format(Component)]}
+ 				end,
+ 				Op)
+	      end,
+	      Ops).
+
+proxy(State0) ->
     receive
 	{browser, Browser, Msg} ->
 	    io:format("received: ~p~n", [Msg]),
@@ -34,26 +50,38 @@ proxy(Browser, State0) ->
 								    {<<"serverVersion">>, State1#state.serverversion},
 								    {<<"applied_ops">>, length(Ops)}
 								   ]}}]})},
-			    proxy(Browser, State1);
+			    proxy(State1);
 			_ ->
 			    io:format("?? : ~p~n", [State0]),
-			    proxy(Browser, State0)
+			    proxy(State0)
 		    end;
 		_ ->
-		    
-%% 		    Browser ! {send, mochijson2:encode(
-%% 			       {struct, [{<<"ack">>, {struct, [
-%% 							       {<<"ack_version">>, 0 },
-%% 							       {<<"new_server_version">>, 0}
-%% 							      ]}}]})},
-		    %%timer:sleep(1000),
-		    proxy(Browser, State0)
+
+		    proxy(State0)
 	    end;
-	_ -> proxy(Browser, State0)
+	{append, Browser, NewOps} ->
+	    DocOps = State0#state.resultingops,
+	    Document = composer:apply_empty(DocOps),
+ 	    io:format("document: ~p~n", [Document]),
+ 	     State1 = State0#state{
+			resultingops=State0#state.resultingops ++ NewOps,
+			serverversion=State0#state.serverversion + 1
+		       },
+ 	    Browser ! {send, mochijson2:encode(
+    			       {struct, [{<<"ops">>, 
+    					  {struct, [
+    						    {<<"serverVersion">>,  
+  						     State1#state.serverversion},
+    						    {<<"applied_ops">>,
+						     ops_to_json_format(NewOps)}
+    						   ]}}]})},
+	    proxy(State1);
+	{browser_closed, _Browser} ->
+	    ok;
+	X -> 
+	    io:format("Unknown message: ~p~n", [X]),
+	    proxy(State0)
     end.
-
-
-
 
 create_listener(State) ->
     {ok, Listen} = gen_tcp:listen(1234, [{packet,0},
@@ -72,13 +100,12 @@ wait(Socket, State) ->
 		 "HTTP/1.1 101 Web Socket Protocol Handshake\r\n",
 		 "Upgrade: WebSocket\r\n",
 		 "Connection: Upgrade\r\n",
-		 "WebSocket-Origin: file://\r\n",
+		 "WebSocket-Origin: null\r\n",
 		 "WebSocket-Location: ",
 		 "  ws://localhost:1234/websession\r\n\r\n"
 		],
 	    gen_tcp:send(Socket, Handshake),
-	    Browser = self(),
-	    Pid = spawn_link(fun() -> proxy(Browser, State) end),
+	    Pid = spawn_link(fun() -> proxy(State) end),
 	    loop(zero, Socket, Pid);
 	Any ->
 	    io:format("??? Received:~p~n",[Any]),
@@ -92,6 +119,9 @@ loop(Buff, Socket, Pid) ->
 	{tcp_closed, Socket} ->
 	    io:format("Connection closed from client~n"),
 	    Pid ! {browser_closed, self()};
+	{append, NewOps} ->
+	    Pid ! {append, self(), NewOps},
+	    loop(Buff, Socket, Pid);
 	{send, Data} ->
 	    gen_tcp:send(Socket, [0,Data,255]),
 	    loop(Buff, Socket, Pid);

@@ -35,10 +35,19 @@ function initws() {
 
     // If the data contains an operation, apply it to
     // the document
-    if (data.op) {
-      var doc = editor.text();
-      var newDoc = apply_op(doc, data.op);
-      editor.text(newDoc);
+    if (data.ops) {
+      var appliedOps = data.ops.applied_ops;
+
+      if (outgoingOps.length == 0) {
+	serverVersion = data.ops.serverVersion;
+	clientVersion = serverVersion;
+
+	// TODO: Sync can be lost here between editor and ops result
+	ops = ops.concat(appliedOps);
+	var doc = get_doc();
+	$("#output").text(doc);
+	editor.text(doc);
+      }
     }
 
     
@@ -59,17 +68,20 @@ var clientVersion = 0;
 var serverVersion = 0;
 var acknowledged = true;
 
-function pushOp(op) {
-
-  // Apply on the client side
-  ops.push(op);
-  //debug(JSON.stringify(ops));
+function get_doc() {
   var doc = "";
   for (var i = 0; i < ops.length; ++i) {
     doc = apply_op(doc, ops[i]);
   }
+  return doc;
+}
+
+function pushOp(op) {
+
+  // Apply on the client side
+  ops.push(op);
   ++clientVersion;
-  $("#output").text(doc);
+  $("#output").text(get_doc());
 
   // If the server is at the same version,
   // send the next ops. Otherwise queue
