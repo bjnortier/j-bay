@@ -21,16 +21,17 @@ function initws() {
     debug("received: " + evt.data); 
     var data = JSON.parse(evt.data);
     if (data.ack) {
-      var numberOfOps = data.ack.opsApplied;
+      var appliedOps = data.ack.applied_ops;
+      serverVersion = data.ack.serverVersion;
       var newOutgoingOps = [];
-      for (var i = numberOfOps; i < outgoingOps.length; ++i) {
-	newOutgoingOps[i - numberOfOps] = outgoingOps[i];
+      for (var i = appliedOps; i < outgoingOps.length; ++i) {
+	newOutgoingOps[i - appliedOps] = outgoingOps[i];
       }
       outgoingOps = newOutgoingOps;
       acknowledged = true;
     }
 
-    debug(JSON.stringify(outgoingOps));
+    debug("Outgoing: " + JSON.stringify(outgoingOps));
 
     // If the data contains an operation, apply it to
     // the document
@@ -78,6 +79,7 @@ function pushOp(op) {
   if (acknowledged) {
     var message = {};
     message.clientVersion = clientVersion;
+    message.serverVersion = serverVersion;
     message.ops = outgoingOps;
     acknowledged = false;
     txText(JSON.stringify(message));    
