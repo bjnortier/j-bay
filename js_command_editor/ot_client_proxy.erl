@@ -23,7 +23,7 @@ ops_to_json_format(Ops) ->
 	      end,
 	      Ops).
 
-proxy(State0) ->
+proxy(Browser, State0) ->
     receive
 	{browser, Browser, Msg} ->
 	    io:format("received: ~p~n", [Msg]),
@@ -50,23 +50,23 @@ proxy(State0) ->
 								    {<<"serverVersion">>, State1#state.serverversion},
 								    {<<"applied_ops">>, length(Ops)}
 								   ]}}]})},
-			    proxy(State1);
+			    proxy(Browser, State1);
 			_ ->
 			    io:format("?? : ~p~n", [State0]),
-			    proxy(State0)
+			    proxy(Browser, State0)
 		    end;
 		_ ->
 
-		    proxy(State0)
+		    proxy(Browser, State0)
 	    end;
 	{append, Browser, NewOps} ->
 	    DocOps = State0#state.resultingops,
 	    Document = composer:apply_empty(DocOps),
  	    io:format("document: ~p~n", [Document]),
- 	     State1 = State0#state{
-			resultingops=State0#state.resultingops ++ NewOps,
-			serverversion=State0#state.serverversion + 1
-		       },
+	    State1 = State0#state{
+		       resultingops=State0#state.resultingops ++ NewOps,
+		       serverversion=State0#state.serverversion + 1
+		      },
  	    Browser ! {send, mochijson2:encode(
     			       {struct, [{<<"ops">>, 
     					  {struct, [
@@ -75,12 +75,32 @@ proxy(State0) ->
     						    {<<"applied_ops">>,
 						     ops_to_json_format(NewOps)}
     						   ]}}]})},
-	    proxy(State1);
+	    proxy(Browser, State1);
 	{browser_closed, _Browser} ->
 	    ok;
 	X -> 
 	    io:format("Unknown message: ~p~n", [X]),
-	    proxy(State0)
+	    proxy(Browser, State0)
+    after 5000 ->
+	    DocOps = State0#state.resultingops,
+	    Document = composer:apply_empty(DocOps),
+	    NewOps = [case length(Document) of
+			 0 -> [];
+			 _ -> [{ret, length(Document)}]
+		     end ++  [{ins, "X"}]],
+	    State1 = State0#state{
+		       resultingops=State0#state.resultingops ++ NewOps,
+		       serverversion=State0#state.serverversion + 1
+		      },
+ 	    Browser ! {send, mochijson2:encode(
+    			       {struct, [{<<"ops">>, 
+    					  {struct, [
+    						    {<<"serverVersion">>,  
+  						     State1#state.serverversion},
+    						    {<<"applied_ops">>,
+						     ops_to_json_format(NewOps)}
+    						   ]}}]})},
+	    proxy(Browser, State1)
     end.
 
 create_listener(State) ->
@@ -105,7 +125,8 @@ wait(Socket, State) ->
 		 "  ws://localhost:1234/websession\r\n\r\n"
 		],
 	    gen_tcp:send(Socket, Handshake),
-	    Pid = spawn_link(fun() -> proxy(State) end),
+	    BrowserPid = self(),
+	    Pid = spawn_link(fun() -> proxy(BrowserPid, State) end),
 	    loop(zero, Socket, Pid);
 	Any ->
 	    io:format("??? Received:~p~n",[Any]),
