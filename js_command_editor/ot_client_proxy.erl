@@ -23,24 +23,48 @@ ops_to_json_format(Ops) ->
 	      end,
 	      Ops).
 
-replace_x_str([Hd|Rest], Replaced) ->
-    case Hd of
-	$X ->
-	    replace_x_str(Rest, Replaced ++ [{del, "X"},{ins, "Y"}]);
-	_ -> 
-	    replace_x_str(Rest, Replaced ++ [{ret, 1}])
-    end;
-replace_x_str([], Replaced) ->
-    Replaced.
+replace(String) ->
+    case string:str(String, "FOO") of
+	0 -> 
+	    [{ret, length(String)}];
+	Index ->
+	    case Index of
+		1 -> [];
+		_ -> [{ret, Index - 1}]
+	    end
+		++
+		[{del, "FOO"}, {ins, "BAR"}]
+		++
+		if 
+		    Index =:= length(String) - 2 ->
+			[];
+		    true ->
+			[{ret, length(String) - 3}]
+		end
+    end.
+	    
+    
+%% replace_x_str([Hd|Rest], Replaced) ->
+%%     case Hd of
+%% 	$X ->
+%% 	    replace_x_str(Rest, Replaced ++ [{del, "X"},{ins, "Y"}]);
+%% 	_ -> 
+%% 	    replace_x_str(Rest, Replaced ++ [{ret, 1}])
+%%     end;
+%% replace_x_str([], Replaced) ->
+%%     Replaced.
 
 replace_x(Browser, State0) ->
-    timer:sleep(500),
+    %%timer:sleep(500),
     DocOps = State0#state.resultingops,
     Document = composer:apply_empty(DocOps),
     
-    case lists:member($X, Document) of
-	true ->
-	    NewOps = [ot:compress(replace_x_str(Document, []))],
+    case string:str(Document, "FOO") of
+	0 ->
+	    proxy(Browser, State0);
+	_ ->
+	    NewOps = [ot:compress(replace(Document))],
+	    io:format("replaceops: ~p~n", [NewOps]),
 	    State1 = State0#state{
 		       resultingops=State0#state.resultingops ++ NewOps,
 		       serverversion=State0#state.serverversion + 1
@@ -53,9 +77,8 @@ replace_x(Browser, State0) ->
 						    {<<"applied_ops">>,
 						     ops_to_json_format(NewOps)}
 						   ]}}]})},
-	    proxy(Browser, State1);
-	false ->
-	    proxy(Browser, State0)
+	    proxy(Browser, State1)
+	    
     end.
     
 
