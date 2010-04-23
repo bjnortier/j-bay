@@ -23,35 +23,127 @@ ops_to_json_format(Ops) ->
 	      end,
 	      Ops).
 
+replace_x_str([Hd|Rest], Replaced) ->
+    case Hd of
+	$X ->
+	    replace_x_str(Rest, Replaced ++ [{del, "X"},{ins, "Y"}]);
+	_ -> 
+	    replace_x_str(Rest, Replaced ++ [{ret, 1}])
+    end;
+replace_x_str([], Replaced) ->
+    Replaced.
+
+replace_x(Browser, State0) ->
+    timer:sleep(500),
+    DocOps = State0#state.resultingops,
+    Document = composer:apply_empty(DocOps),
+    
+    case lists:member($X, Document) of
+	true ->
+	    NewOps = [ot:compress(replace_x_str(Document, []))],
+	    State1 = State0#state{
+		       resultingops=State0#state.resultingops ++ NewOps,
+		       serverversion=State0#state.serverversion + 1
+		      },
+	    Browser ! {send, mochijson2:encode(
+			       {struct, [{<<"ops">>, 
+					  {struct, [
+						    {<<"serverVersion">>,  
+						     State1#state.serverversion},
+						    {<<"applied_ops">>,
+						     ops_to_json_format(NewOps)}
+						   ]}}]})},
+	    proxy(Browser, State1);
+	false ->
+	    proxy(Browser, State0)
+    end.
+    
+
 proxy(Browser, State0) ->
+    io:format("Document: ~p~n", [ composer:apply_empty(State0#state.resultingops)]),
+
+
     receive
 	{browser, Browser, Msg} ->
 	    io:format("received: ~p~n", [Msg]),
 	    ServerVersion = State0#state.serverversion,
+ 	    ServerOps = State0#state.resultingops,
 	    Decoded = mochijson2:decode(Msg),
 	    case Decoded of
-		{struct, [{<<"clientVersion">>, ClientClientVersion},
-			  {<<"serverVersion">>, ClientServerVersion},
-			  {<<"ops">>, Ops}]} ->
+		{struct,[{<<"transform">>,
+			  {struct,[{<<"outgoingOps">>, ClientOpsJSON},
+				   {<<"serverOps">>, ServerOpsJSON}]}}]} ->
+		    [ClientDocOp] = to_docops(ClientOpsJSON),
+		    [ServerDocOp] = to_docops(ServerOpsJSON),
+		    io:format("Before: ~p:~p~n", [ClientDocOp, ServerDocOp]),
+		    {St, Ct} = ot:transform(ServerDocOp, ClientDocOp),
+		    io:format("After: ~p:~p~n", [Ct, St]),
+
+		    Browser ! {send, 
+			       mochijson2:encode(
+				 {struct, [{<<"transformed">>, 
+					    {struct, [
+						      {<<"cdash">>, ops_to_json_format([Ct])},
+						      {<<"sdash">>, ops_to_json_format([St])}]}}]})},
 		    
-		    DocOps = to_docops(Ops),
+		    %% State is unaffected
+		    proxy(Browser, State0);
+		
+		%% Client ops have been received
+		{struct, [{<<"client_ops">>,
+			   {struct, [{<<"clientVersion">>, ClientClientVersion},
+				     {<<"serverVersion">>, ClientServerVersion},
+				     {<<"ops">>, ClientOps}]}}]} ->
 		    
-		    case ServerVersion of 
-			ClientServerVersion ->
+		    if 
+			
+			ServerVersion =:= ClientServerVersion ->
+			    ClientDocOps = to_docops(ClientOps),
 			    State1 = State0#state{
-				       resultingops=State0#state.resultingops ++ DocOps,
+				       resultingops=State0#state.resultingops ++ ClientDocOps,
 				       serverversion=State0#state.serverversion + 1
 				      },
-			    io:format("New state: ~p~n", [State1]),
+			    %%io:format("New state: ~p~n", [State1]),
 			    Browser ! {send, mochijson2:encode(
 					       {struct, [{<<"ack">>, 
 							  {struct, [
 								    {<<"clientVersion">>, ClientClientVersion },
 								    {<<"serverVersion">>, State1#state.serverversion},
-								    {<<"applied_ops">>, length(Ops)}
+								    {<<"applied_ops">>, length(ClientDocOps)}
 								   ]}}]})},
+
+			    replace_x(Browser, State1);
+
+			%% TODO: Update difference > 1 (need composition?)
+			ClientServerVersion =:= ServerVersion - 1 ->
+			    %%io:format("received: ~p~n", [Msg]),
+			    io:format("ClientVersion = ServerVersion - 1 : ~p~n", [State0]),
+
+			    %% Transform the client ops to the unknown
+			    %% server ops. E.g. if server version is 2, and client
+			    %% thinks server version is 1, then there is one operation
+			    %% to transform
+			    [ClientDocOp] = to_docops(ClientOps),
+			    ServerDocOp = lists:nth(length(ServerOps), ServerOps),
+
+			    io:format("SS: Before: ~p:~p~n", [ClientDocOp, ServerDocOp]),
+			    {St, Ct} = ot:transform(ServerDocOp, ClientDocOp),
+			    io:format("SS: After: ~p:~p~n", [Ct, St]),
+
+
+			    State1 = State0#state{
+				       resultingops=State0#state.resultingops ++ [Ct],
+				       serverversion=State0#state.serverversion + 1
+				      },
+
+			    %% DocOps = State1#state.resultingops,
+%% 			    Document = composer:apply_empty(DocOps),
+%% 			    io:format("State: ~p~n", [State1]),
+%% 			    io:format("Document: ~p~n", [Document]),
+			    
 			    proxy(Browser, State1);
-			_ ->
+			true ->
+			    io:format("received: ~p~n", [Msg]),
 			    io:format("?? : ~p~n", [State0]),
 			    proxy(Browser, State0)
 		    end;
@@ -81,26 +173,26 @@ proxy(Browser, State0) ->
 	X -> 
 	    io:format("Unknown message: ~p~n", [X]),
 	    proxy(Browser, State0)
-    after 5000 ->
-	    DocOps = State0#state.resultingops,
-	    Document = composer:apply_empty(DocOps),
-	    NewOps = [case length(Document) of
-			 0 -> [];
-			 _ -> [{ret, length(Document)}]
-		     end ++  [{ins, "X"}]],
-	    State1 = State0#state{
-		       resultingops=State0#state.resultingops ++ NewOps,
-		       serverversion=State0#state.serverversion + 1
-		      },
- 	    Browser ! {send, mochijson2:encode(
-    			       {struct, [{<<"ops">>, 
-    					  {struct, [
-    						    {<<"serverVersion">>,  
-  						     State1#state.serverversion},
-    						    {<<"applied_ops">>,
-						     ops_to_json_format(NewOps)}
-    						   ]}}]})},
-	    proxy(Browser, State1)
+%%     after 5000 ->
+%% 	    DocOps = State0#state.resultingops,
+%% 	    Document = composer:apply_empty(DocOps),
+%% 	    NewOps = [case length(Document) of
+%% 			 0 -> [];
+%% 			 _ -> [{ret, length(Document)}]
+%% 		     end ++  [{ins, "X"}]],
+%% 	    State1 = State0#state{
+%% 		       resultingops=State0#state.resultingops ++ NewOps,
+%% 		       serverversion=State0#state.serverversion + 1
+%% 		      },
+%%  	    Browser ! {send, mochijson2:encode(
+%%     			       {struct, [{<<"ops">>, 
+%%     					  {struct, [
+%%     						    {<<"serverVersion">>,  
+%%   						     State1#state.serverversion},
+%%     						    {<<"applied_ops">>,
+%% 						     ops_to_json_format(NewOps)}
+%%     						   ]}}]})},
+%% 	    proxy(Browser, State1)
     end.
 
 create_listener(State) ->

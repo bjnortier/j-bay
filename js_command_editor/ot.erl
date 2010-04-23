@@ -3,34 +3,34 @@
 %%-define(_assertMatch(X, Y), X =:= Y).
 -compile(export_all).
 
-op_skip_size({insert, _}) ->
+op_skip_size({ins, _}) ->
     0;
-op_skip_size({delete, Chars}) ->
+op_skip_size({del, Chars}) ->
     length(Chars);
-op_skip_size({retain, N}) ->
+op_skip_size({ret, N}) ->
     N.
 
 
 %%
 %% The argument indicates how the size of the undesired segment, so the
 %% operation should be split up into segments of size length(Op) - X and X
-split_op({delete, Chars}, SecondSegmentSize) ->
+split_op({del, Chars}, SecondSegmentSize) ->
     Length = length(Chars),
-    {{delete, lists:sublist(Chars, 1, Length - SecondSegmentSize)},
-     {delete, lists:sublist(Chars, Length - SecondSegmentSize + 1, SecondSegmentSize)}};
-split_op({retain, N}, SecondSegmentSize) ->
-    {{retain, N - SecondSegmentSize}, {retain, SecondSegmentSize}};
+    {{del, lists:sublist(Chars, 1, Length - SecondSegmentSize)},
+     {del, lists:sublist(Chars, Length - SecondSegmentSize + 1, SecondSegmentSize)}};
+split_op({ret, N}, SecondSegmentSize) ->
+    {{ret, N - SecondSegmentSize}, {ret, SecondSegmentSize}};
 split_op(Component, _) ->
     throw(io_lib:format("split_op called on unsplittable component, ~p", [Component])).
 
-apply_op({insert, Chars}) ->
-    {{insert, Chars}, {retain, length(Chars)}};
+apply_op({ins, Chars}) ->
+    {{ins, Chars}, {ret, length(Chars)}};
 
-apply_op({retain, N}) ->
-    {{retain, N}, {retain, 0}};
+apply_op({ret, N}) ->
+    {{ret, N}, {ret, 0}};
 
-apply_op({delete, Chars}) ->
-    {{delete, Chars}, {retain, -length(Chars)}}.
+apply_op({del, Chars}) ->
+    {{del, Chars}, {ret, -length(Chars)}}.
 
 
 transform(ClientOps, ServerOps) ->
@@ -86,10 +86,10 @@ compress_deletes([H|Rest]) ->
 compress_deletes(Hd, [], Acc) ->
     Acc ++ [Hd];
 %% TODO: What about when -N is -1 and length(Chars) == 2?
-compress_deletes({retain, N}, [{delete, Chars}|Rest], Acc) when -N =:= length(Chars) ->
-    compress_deletes({retain, 0}, Rest, Acc);
-compress_deletes({delete, Chars}, [{retain, N}|Rest], Acc) when -N =:= length(Chars) ->
-    compress_deletes({retain, 0}, Rest, Acc);
+compress_deletes({ret, N}, [{del, Chars}|Rest], Acc) when -N =:= length(Chars) ->
+    compress_deletes({ret, 0}, Rest, Acc);
+compress_deletes({del, Chars}, [{ret, N}|Rest], Acc) when -N =:= length(Chars) ->
+    compress_deletes({ret, 0}, Rest, Acc);
 compress_deletes(Hd, [Next |Rest], Acc) ->
     compress_deletes(Next, Rest, Acc ++ [Hd]).
 
@@ -101,19 +101,19 @@ compress_retains([H|Rest]) ->
 compress_retains(Hd, [], Acc) ->
     Acc ++ [Hd];
 %% TODO: What about when -N is -1 and length(Chars) == 2?
-compress_retains({retain, N}, [{delete, Chars}|Rest], Acc) when -N =:= length(Chars) ->
-    compress_retains({retain, 0}, Rest, Acc);
-compress_retains({delete, Chars}, [{retain, N}|Rest], Acc) when -N =:= length(Chars) ->
-    compress_retains({retain, 0}, Rest, Acc);
-compress_retains({retain, N}, [{retain,M} |Rest], Acc) ->
-    compress_retains({retain, N+M}, Rest, Acc);
+compress_retains({ret, N}, [{del, Chars}|Rest], Acc) when -N =:= length(Chars) ->
+    compress_retains({ret, 0}, Rest, Acc);
+compress_retains({del, Chars}, [{ret, N}|Rest], Acc) when -N =:= length(Chars) ->
+    compress_retains({ret, 0}, Rest, Acc);
+compress_retains({ret, N}, [{ret,M} |Rest], Acc) ->
+    compress_retains({ret, N+M}, Rest, Acc);
 compress_retains(Hd, [Next |Rest], Acc) ->
     compress_retains(Next, Rest, Acc ++ [Hd]).
     
 filter_empty(Components) ->
     F = fun(Op, Acc) -> 
 		case Op of
-		    {retain, 0} -> Acc;
+		    {ret, 0} -> Acc;
 		    _ -> [Op|Acc]
 		end
 	end,
@@ -123,96 +123,96 @@ filter_empty(Components) ->
 compress_test_() ->
     [
      ?_assertMatch([],compress([])),
-     ?_assertMatch([{insert, "abc"},  {retain, 0}], compress([{insert, "abc"}, {retain, 1}, {retain, -1}])),
-     ?_assertMatch([{retain,1},{delete,"b"}, {retain, 1}],compress([{retain,1},{delete,"b"},{retain,2},{retain,-1}])),
-     ?_assertMatch([{retain,2}], compress([{retain,1},{delete,"b"},{retain,-1},{retain,1}])),
-     ?_assertMatch([{retain,1}], compress([{retain,-1},{delete,"b"},{retain,1}])),
-     ?_assertMatch([{retain, 2}], 
-		   compress([{retain,1}, 
-			     {retain,0},
-			     {delete,"X"},
-			     {retain,-1},
-			     {retain,1},
-			     {retain,0}])),
-     ?_assertMatch([{retain, 2}],
-		   compress([{retain,0},
-			     {retain,1},
-			     {retain,-1},
-			     {delete,"X"},
-			     {retain,0},
-			     {retain,1}]))
+     ?_assertMatch([{ins, "abc"},  {ret, 0}], compress([{ins, "abc"}, {ret, 1}, {ret, -1}])),
+     ?_assertMatch([{ret,1},{del,"b"}, {ret, 1}],compress([{ret,1},{del,"b"},{ret,2},{ret,-1}])),
+     ?_assertMatch([{ret,2}], compress([{ret,1},{del,"b"},{ret,-1},{ret,1}])),
+     ?_assertMatch([{ret,1}], compress([{ret,-1},{del,"b"},{ret,1}])),
+     ?_assertMatch([{ret, 2}], 
+		   compress([{ret,1}, 
+			     {ret,0},
+			     {del,"X"},
+			     {ret,-1},
+			     {ret,1},
+			     {ret,0}])),
+     ?_assertMatch([{ret, 2}],
+		   compress([{ret,0},
+			     {ret,1},
+			     {ret,-1},
+			     {del,"X"},
+			     {ret,0},
+			     {ret,1}]))
     ].
     
 filter_empty_test_() ->
     [
-     ?_assertMatch([{insert, "abc"}, {retain, 2}], 
-		   filter_empty([{insert, "abc"}, {retain, 0}, {retain, 2}]))
+     ?_assertMatch([{ins, "abc"}, {ret, 2}], 
+		   filter_empty([{ins, "abc"}, {ret, 0}, {ret, 2}]))
     ].
 
 transform_1_test_() ->
-    ClientComponents = [{insert, "abc"}],
-    ServerComponents = [{insert, "def"}],
+    ClientComponents = [{ins, "abc"}],
+    ServerComponents = [{ins, "def"}],
     [
      ?_assertMatch(
-	{[{insert, "abc"}, {retain, 3}], [{retain, 3}, {insert, "def"}]},
+	{[{ins, "abc"}, {ret, 3}], [{ret, 3}, {ins, "def"}]},
 	transform(ClientComponents, ServerComponents))
     ].
 
 test_transform_2() ->
-    ClientComponents = [{insert, "xyz"}, {retain, 3}],
-    ServerComponents = [{retain, 3}, {insert, "def"}],
+    ClientComponents = [{ins, "xyz"}, {ret, 3}],
+    ServerComponents = [{ret, 3}, {ins, "def"}],
     [
      ?_assertMatch(
-	{[{insert, "xyz"}, {retain, 3}, {retain, 3}],
-	 [{retain, 3}, {retain, 3}, {insert, "def"}]},
+	{[{ins, "xyz"}, {ret, 3}, {ret, 3}],
+	 [{ret, 3}, {ret, 3}, {ins, "def"}]},
 	transform(ClientComponents, ServerComponents))
     ].
 
 test_transform_2b() ->
-    ClientComponents = [{insert, "abc"}, {retain, 1}, {insert, "def"}],
-    ServerComponents = [{retain, 1}],
+    ClientComponents = [{ins, "abc"}, {ret, 1}, {ins, "def"}],
+    ServerComponents = [{ret, 1}],
     [
      ?_assertMatch(
-	{[{insert, "abc"}, {retain, 1}, {insert, "def"}],
-	 [{retain, 3}, {retain, 1}, {retain, 3}]},
+	{[{ins, "abc"}, {ret, 1}, {ins, "def"}],
+	 [{ret, 3}, {ret, 1}, {ret, 3}]},
 	transform(ClientComponents, ServerComponents))
     ].
 
 test_transform_2c() ->
-    ClientComponents = [{insert, "xyz"}, {retain, 3}],
-    ServerComponents = [{retain, 3}, {insert, "def"}],
+    ClientComponents = [{ins, "xyz"}, {ret, 3}],
+    ServerComponents = [{ret, 3}, {ins, "def"}],
     [
      ?_assertMatch(
-	{[{insert, "xyz"}, {retain, 3}, {retain, 3}],
-	 [{retain, 3}, {retain, 3}, {insert, "def"}]},
+	{[{ins, "xyz"}, {ret, 3}, {ret, 3}],
+	 [{ret, 3}, {ret, 3}, {ins, "def"}]},
 	transform(ClientComponents, ServerComponents))
     ].
 
 
 test_transform_3() ->
-    ClientComponents = [{retain, 1}, {delete, "b"}, {retain, 1}],
-    ServerComponents = [{retain, 2}, {delete, "c"}],
+    ClientComponents = [{ret, 1}, {del, "b"}, {ret, 1}],
+    ServerComponents = [{ret, 2}, {del, "c"}],
     [
      ?_assertMatch(
-	{[{retain, 1}, {delete, "b"}, {retain, 1}, {retain, -1}],
-	 [{retain, 2}, {retain, -1}, {delete, "c"}]},
+	{[{ret, 1}, {del, "b"}, {ret, 1}, {ret, -1}],
+	 [{ret, 2}, {ret, -1}, {del, "c"}]},
 	transform(ClientComponents, ServerComponents))
     ].
 
 
 test_transform_4() ->
-    ClientComponents = [{insert, "def"}],
-    ServerComponents = [{insert, "abc"}],
+    ClientComponents = [{ins, "def"}],
+    ServerComponents = [{ins, "abc"}],
     [
      ?_assertMatch(
-	{[{insert, "def"}, {retain, 3}],
-	 [{retain, 3}, {insert, "abc"}]},
+	{[{ins, "def"}, {ret, 3}],
+	 [{ret, 3}, {ins, "abc"}]},
 	transform(ClientComponents, ServerComponents))
     ].
 
 transform_5_test_() ->
-    ClientComponents = [{delete, "b"}],
-    ServerComponents = [{delete, "b"}],
+    ClientComponents = [{del, "b"}],
+    ServerComponents = [{del, "b"}],
     [
      ?_assertMatch(
 	{[], []}, 
@@ -220,48 +220,59 @@ transform_5_test_() ->
     ].
 
 transform_7_test_() ->
-    ClientComponents = [{delete, "abc"}, {retain, 3}],
-    ServerComponents = [{retain, 3}, {insert, "!"}, {retain, 3}],
+    ClientComponents = [{del, "abc"}, {ret, 3}],
+    ServerComponents = [{ret, 3}, {ins, "!"}, {ret, 3}],
     [
-     ?_assertMatch({[{delete, "abc"}, {retain, 4}],
-		    [{insert, "!"}, {retain, 3}]},
+     ?_assertMatch({[{del, "abc"}, {ret, 4}],
+		    [{ins, "!"}, {ret, 3}]},
 		   transform(ClientComponents, ServerComponents))
     ].
 
 transform_8_test_() ->
-    ClientComponents = [{delete, "abc"}, {retain, 3}],
-    ServerComponents = [{retain, 3}, {insert, "!"}, {retain, 3}],
+    ClientComponents = [{del, "abc"}, {ret, 3}],
+    ServerComponents = [{ret, 3}, {ins, "!"}, {ret, 3}],
     [
-     ?_assertMatch({[{delete, "abc"}, {retain, 4}],
-		    [{insert, "!"}, {retain, 3}]},
+     ?_assertMatch({[{del, "abc"}, {ret, 4}],
+		    [{ins, "!"}, {ret, 3}]},
 		   transform(ClientComponents, ServerComponents))
     ].
 
 
 transform_9_test_() ->
-    ClientComponents = [{retain, 3}, {insert, "X"}, {retain, 3}],
-    ServerComponents = [{retain, 2}, {delete, "cd"}, {retain, 2}],
+    ClientComponents = [{ret, 3}, {ins, "X"}, {ret, 3}],
+    ServerComponents = [{ret, 2}, {del, "cd"}, {ret, 2}],
     [
-     ?_assertMatch({[{retain, 2}, {insert, "X"}, {retain, 2}],
-		    [{retain, 2}, {delete, "c"}, {retain, 1}, {delete, "d"}, {retain, 2}]},
+     ?_assertMatch({[{ret, 2}, {ins, "X"}, {ret, 2}],
+		    [{ret, 2}, {del, "c"}, {ret, 1}, {del, "d"}, {ret, 2}]},
 		   transform(ClientComponents, ServerComponents))
     ].
 
 transform_10_test_() ->
-    ClientComponents = [{retain, 1}, {delete, "X"}, {retain, 1}],
-    ServerComponents = [{retain, 1}, {delete, "X"}, {retain, 1}],
+    ClientComponents = [{ret, 1}, {del, "X"}, {ret, 1}],
+    ServerComponents = [{ret, 1}, {del, "X"}, {ret, 1}],
     [
-     ?_assertMatch({[{retain, 2}],
-		    [{retain, 2}]},
+     ?_assertMatch({[{ret, 2}],
+		    [{ret, 2}]},
 		   transform(ClientComponents, ServerComponents))
     ].
 
+transform_11_test_() ->
+    ClientComponents = [{ret, 1}, {ins, "X"}],
+    ServerComponents = [{del, "X"}, {ins, "Y"}],
+    [
+     ?_assertMatch({[{ins, "X"},{ret, 1}],
+		    [{del, "X"},{ret, 1}, {ins, "Y"}]},
+		   transform(ClientComponents, ServerComponents))
+    ].
+
+
+
 segment_test_() ->
      [
-      ?_assertMatch({{retain, 2}, {retain, 1}}, split_op({retain, 3}, 1)),
-      ?_assertMatch({{retain, 0}, {retain, 3}}, split_op({retain, 3}, 3)),
-      ?_assertMatch({{delete, "c"}, {delete, "d"}}, split_op({delete, "cd"}, 1)),
-      ?_assertMatch({{delete, "d"}, {delete, "ef"}}, split_op({delete, "def"}, 2))
+      ?_assertMatch({{ret, 2}, {ret, 1}}, split_op({ret, 3}, 1)),
+      ?_assertMatch({{ret, 0}, {ret, 3}}, split_op({ret, 3}, 3)),
+      ?_assertMatch({{del, "c"}, {del, "d"}}, split_op({del, "cd"}, 1)),
+      ?_assertMatch({{del, "d"}, {del, "ef"}}, split_op({del, "def"}, 2))
      ].
 
 

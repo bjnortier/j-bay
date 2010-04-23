@@ -20,6 +20,28 @@ function initws() {
   ws.onmessage = function (evt) {
     debug("received: " + evt.data); 
     var data = JSON.parse(evt.data);
+
+    if (data.transformed) {
+      transforming = false;
+
+      // The outoing ops are replaced with the transformed
+      // version of the client ops
+      debug('cdash: ' + JSON.stringify(data.transformed.cdash));
+      debug('sdash: ' + JSON.stringify(data.transformed.sdash));
+
+      ops = ops.concat(data.transformed.sdash);
+      outgoingOps = data.transformed.cdash;
+      var doc = get_doc();
+      $("#output").text(doc);
+      editor.text(doc);
+
+      // TODO: Update for composite transforms
+      serverVersion = serverVersion + 2;
+
+      // And now try and send the outgoing ops again?
+      sendOutgoing();
+    }
+
     if (data.ack) {
       var appliedOps = data.ack.applied_ops;
       serverVersion = data.ack.serverVersion;
@@ -29,9 +51,8 @@ function initws() {
       }
       outgoingOps = newOutgoingOps;
       acknowledged = true;
+      sendOutgoing();
     }
-
-    debug("Outgoing: " + JSON.stringify(outgoingOps));
 
     // If the data contains an operation, apply it to
     // the document
@@ -47,6 +68,13 @@ function initws() {
 	var doc = get_doc();
 	$("#output").text(doc);
 	editor.text(doc);
+      } else {
+
+	debug("transforming");
+	var serverOps = data.ops.applied_ops;
+	txText(JSON.stringify({transform : 
+	      {outgoingOps : outgoingOps, serverOps : serverOps}}));
+	transforming = true;
       }
     }
 
@@ -67,39 +95,50 @@ var editor = $("#editor");
 var clientVersion = 0;
 var serverVersion = 0;
 var acknowledged = true;
+var transforming = false;
 
 function get_doc() {
+  debug('--------');
+  debug('ops: ' + JSON.stringify(ops));
+  debug('outgoing: ' + JSON.stringify(outgoingOps));
+  debug('--------');
+
   var doc = "";
   for (var i = 0; i < ops.length; ++i) {
     doc = apply_op(doc, ops[i]);
   }
+
   return doc;
 }
 
 function pushOp(op) {
 
-  // Apply on the client side
-  ops.push(op);
-  ++clientVersion;
-  $("#output").text(get_doc());
-
   // If the server is at the same version,
   // send the next ops. Otherwise queue
   // the outgoing ops
   outgoingOps.push(op);
+
+  // Apply on the client side
+  ops.push(op);
+  ++clientVersion;
+  $("#output").text(get_doc());
   
   if (acknowledged) {
+    sendOutgoing();
+  }
+
+}
+
+function sendOutgoing() {
+  if (outgoingOps.length > 0) {
     var message = {};
     message.clientVersion = clientVersion;
     message.serverVersion = serverVersion;
     message.ops = outgoingOps;
     acknowledged = false;
-    txText(JSON.stringify(message));    
+    txText(JSON.stringify({client_ops: message}));
   }
-
-
 }
-
 
 
 // Apply an operation on an existing document (a string)
@@ -182,6 +221,11 @@ editor.blur(function() {
   });
 
 editor.keydown(function(event) {
+    // Reject (for now) events that occur during transformation
+    if (transforming) {
+      return;
+    }
+
     updateCursor();
 
     // Arrow keys and apple key
@@ -201,8 +245,6 @@ editor.keydown(function(event) {
     }
 	
     var stringFromCharCode =  String.fromCharCode(event.keyCode);
-
-
     var before;
     var middle;
     var docOp = [];
@@ -228,7 +270,6 @@ editor.keydown(function(event) {
     pushOp(docOp);
     
   });
-
 
 
 editor.keyup(function(event) {
